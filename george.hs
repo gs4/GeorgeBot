@@ -20,7 +20,7 @@ data Bot = Bot { _socket :: Handle,
 type BotData = State (Map String String)
 type BotConfig = Reader Bot
 type BotReaderT = ReaderT Bot IO
-type BotAwesome a = StateT (BotData a) BotReaderT
+type BotAwesome = StateT (BotData ()) BotReaderT
 
 getSocket :: BotConfig Handle
 getSocket = _socket `fmap` ask
@@ -40,7 +40,7 @@ getNick = _nick `fmap` ask
 getUname :: BotConfig String
 getUname = _uname `fmap` ask
 
-runBot :: BotAwesome () () -> Bot -> IO ()
+runBot :: BotAwesome () -> Bot -> IO ()
 runBot codes defaultBot = runReaderT (fst `fmap` (runStateT codes emptyBot)) defaultBot
 
 emptyBot :: BotData ()
@@ -58,25 +58,19 @@ runProg :: String -> String -> Int -> String -> String -> IO ()
 runProg chan' server port nick uname = do
   let chan = if chan' !! 0 == '#' then chan' else '#':chan'
   putStrLn $ "Connecting to channel " ++ chan ++ " on server " ++ server ++ ":" ++ show port
-  h <- irc_connect server port nick uname
+  h <- irc_connect server chan port nick uname
   return ()
-  runBot (irc_channel_join chan listener) (Bot h port server chan nick uname)   
+  runBot (listener) (Bot h port server chan nick uname)   
 
-irc_connect :: String -> Int -> String -> String -> IO Handle
-irc_connect server port nick uname = do
+irc_connect :: String -> String -> Int -> String -> String -> IO Handle
+irc_connect server chan port nick uname = do
   h <- connectTo server ((PortNumber . fromIntegral) port)
   hSetBuffering h NoBuffering
   echo_write h "NICK" nick
   echo_write h "USER" (nick ++ " 0 * :" ++ uname)
+  echo_write h "JOIN" chan
   return h
   
-irc_channel_join :: String -> (Handle -> BotAwesome () ()) -> BotAwesome () ()
-irc_channel_join chan listener_f = do
-  sock <- lift $ _socket `fmap` ask 
---  put conf { _chan = chan }
-  lift $ lift $ echo_write sock "JOIN" chan
-  listener_f sock
-
 irc_write :: Bool -> Handle -> String -> String -> IO ()
 irc_write echo handle s t = do
   hPrintf handle "%s %s\r\n" s t
@@ -84,25 +78,33 @@ irc_write echo handle s t = do
 
 echo_write = irc_write True
 
-listener :: Handle -> BotAwesome () ()
-listener h = forever $ do
-               line <- lift $ lift $ hGetLine h
-               let s = init line
-               (handler s) h
-               lift $ lift $ putStrLn s
-    where
-      forever a = do a; forever a
+bot_write :: String -> String -> BotAwesome ()
+bot_write s t = do
+  sock <- _socket `fmap` ask
+  lift $ lift $ echo_write sock s t
 
-privmsg :: Handle -> String -> String -> BotAwesome () ()
-privmsg h chan s = lift $ lift $ echo_write h "PRIVMSG" (chan ++ " :" ++ s)
+listener :: BotAwesome ()
+listener = do sock <- _socket `fmap` ask
+              forever $ do
+                line <- lift $ lift $ hGetLine sock
+                let s = init line
+                (handler s) sock
+                lift $ lift $ putStrLn s
+        where
+          forever a = do a; forever a
 
-handler :: String -> (Handle -> BotAwesome () ())
-handler input | "PING :" `isPrefixOf` input = \h -> (lift $ lift $ echo_write h "PONG"  (':' : drop 6 input))
+privmsg :: String -> BotAwesome ()
+privmsg s = do 
+  chan <- _chan `fmap` ask
+  bot_write "PRIVMSG" (chan ++ " :" ++ s)
+
+handler :: String -> (Handle -> BotAwesome ())
+handler input | "PING :" `isPrefixOf` input = \h -> (bot_write "PONG"  (':' : drop 6 input))
               | otherwise = eval input
                                   
-eval :: String -> (Handle -> BotAwesome () ())
-eval "!quit" = \h -> lift $ lift $ echo_write h "QUIT" ":Exiting"
-eval ('!':'e':'c':'h':'o':rest) = \h -> privmsg h "chan" rest
+eval :: String -> (Handle -> BotAwesome ())
+eval "!quit" = \h -> bot_write "QUIT" ":Exiting"
+eval ('!':'e':'c':'h':'o':rest) = \h -> privmsg rest
 eval _ = \h -> return ()
 
 
