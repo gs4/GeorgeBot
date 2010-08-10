@@ -1,13 +1,14 @@
 import Data.List
 import Network
 import System.IO
-import Data.Map
+import qualified Data.Map as Map
 import System.Environment (getArgs, getProgName)
 import Text.Printf
 import Control.Monad
 import Control.Monad.State
 import Control.Monad.Reader
 import System.Exit
+import Control.Arrow ((&&&))
 
 data Bot = Bot { _socket :: Handle,
                  _port :: Int,
@@ -17,34 +18,19 @@ data Bot = Bot { _socket :: Handle,
                  _uname :: String
                  } 
 
-type BotData = State (Map String String)
+type BotKey = String
+type BotVal = String
+
+type BotData = State (Map.Map BotKey BotVal)
 type BotConfig = Reader Bot
 type BotReaderT = ReaderT Bot IO
 type BotAwesome = StateT (BotData ()) BotReaderT
-
-getSocket :: BotConfig Handle
-getSocket = _socket `fmap` ask
-
-getPort :: BotConfig Int
-getPort = _port `fmap` ask
-
-getServer :: BotConfig String
-getServer = _server `fmap` ask
-
-getChan :: BotConfig String
-getChan = _chan `fmap` ask
-
-getNick :: BotConfig String
-getNick = _nick `fmap` ask
-
-getUname :: BotConfig String
-getUname = _uname `fmap` ask
 
 runBot :: BotAwesome () -> Bot -> IO ()
 runBot codes defaultBot = runReaderT (fst `fmap` (runStateT codes emptyBot)) defaultBot
 
 emptyBot :: BotData ()
-emptyBot =  put empty
+emptyBot =  put Map.empty
 
 main :: IO ()
 main = do
@@ -58,53 +44,79 @@ runProg :: String -> String -> Int -> String -> String -> IO ()
 runProg chan' server port nick uname = do
   let chan = if chan' !! 0 == '#' then chan' else '#':chan'
   putStrLn $ "Connecting to channel " ++ chan ++ " on server " ++ server ++ ":" ++ show port
-  h <- irc_connect server chan port nick uname
+  h <- ircConnect server chan port nick uname
   return ()
   runBot (listener) (Bot h port server chan nick uname)   
 
-irc_connect :: String -> String -> Int -> String -> String -> IO Handle
-irc_connect server chan port nick uname = do
+ircConnect :: String -> String -> Int -> String -> String -> IO Handle
+ircConnect server chan port nick uname = do
   h <- connectTo server ((PortNumber . fromIntegral) port)
   hSetBuffering h NoBuffering
-  echo_write h "NICK" nick
-  echo_write h "USER" (nick ++ " 0 * :" ++ uname)
-  echo_write h "JOIN" chan
+  echoWrite h "NICK" nick
+  echoWrite h "USER" (nick ++ " 0 * :" ++ uname)
+  echoWrite h "JOIN" chan
   return h
   
-irc_write :: Bool -> Handle -> String -> String -> IO ()
-irc_write echo handle s t = do
+ircWrite :: Bool -> Handle -> String -> String -> IO ()
+ircWrite echo handle s t = do
   hPrintf handle "%s %s\r\n" s t
   printf       "> %s %s\n"   s t
 
-echo_write = irc_write True
+echoWrite = ircWrite True
 
-bot_write :: String -> String -> BotAwesome ()
-bot_write s t = do
+botWrite :: String -> String -> BotAwesome ()
+botWrite s t = do
   sock <- _socket `fmap` ask
-  lift $ lift $ echo_write sock s t
+  liftIO $ echoWrite sock s t
+  
+--botPut :: BotKey -> BotVal -> BotAwesome ()
+-- ghc has to auto-infer this or it fails to compile, (or i could add a pragma)
+botPut key val = modify (Map.insert key val)
+                    
+--botGet :: BotKey -> BotAwesome (Maybe BotKey)
+-- ghc has to auto-infer this or it fails to compile, (or i could add a pragma)
+botGet key = (Map.lookup key) `fmap` get
+                 
 
 listener :: BotAwesome ()
 listener = do sock <- _socket `fmap` ask
               forever $ do
-                line <- lift $ lift $ hGetLine sock
+                line <- liftIO $ hGetLine sock
                 let s = init line
-                (handler s) sock
-                lift $ lift $ putStrLn s
+                handler s
+                liftIO $ putStrLn s
         where
           forever a = do a; forever a
 
-privmsg :: String -> BotAwesome ()
-privmsg s = do 
+privMsg :: String -> BotAwesome ()
+privMsg s = do 
   chan <- _chan `fmap` ask
-  bot_write "PRIVMSG" (chan ++ " :" ++ s)
+  botWrite "PRIVMSG" (chan ++ " :" ++ s)
 
-handler :: String -> (Handle -> BotAwesome ())
-handler input | "PING :" `isPrefixOf` input = \h -> (bot_write "PONG"  (':' : drop 6 input))
+handler :: String -> BotAwesome ()
+handler input | "PING :" `isPrefixOf` input = botWrite "PONG"  (':' : drop 6 input)
               | otherwise = eval input
                                   
-eval :: String -> (Handle -> BotAwesome ())
-eval "!quit" = \h -> bot_write "QUIT" ":Exiting"
-eval ('!':'e':'c':'h':'o':rest) = \h -> privmsg rest
-eval _ = \h -> return ()
+eval :: String -> BotAwesome ()
+eval "!quit" = botWrite "QUIT" ":Exiting"
+eval ('!':'e':'c':'h':'o':rest) = privMsg rest
+{-
+eval ('!':'p':'u':'t':rest) = do --putToMap rest
+                                 chan <- _chan `fmap` ask
+                                 botWrite chan "saved"
+                                 return ()
+eval ('!':'g':'e':'t':rest) = do val <- getFromMap rest
+                                 chan <- gets _chan
+                                 return ()
+-}
+eval _ = return ()
 
+{-
+putToMap :: String -> BotAwesome ()
+putToMap rest = botPut key val
+  where key = takeWhile (/=' ') rest 
+        val = dropWhile (/=' ') rest
 
+getFromMap :: String -> BotAwesome ()
+getFromMap rest = botGet rest
+-}
