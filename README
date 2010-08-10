@@ -1,0 +1,17 @@
+A Haskell implementation of George Karavaev
+
+Goals:
+  Listen to conversation
+  Select random words, and comment or ask questions about them
+    - weight this towards special words
+    - use a parts of speech dictionary to respond appropriately
+    - replace v's at the start of words (like vodka) with w's
+    - sometimes make typos
+
+
+
+
+
+
+
+
