@@ -37,7 +37,7 @@ main = do
   pname <- getProgName
   when (length args /= 1) (putStrLn ("Usage: " ++ pname ++ " <channel>") >> exitWith (ExitFailure (0-1)))
   let chan = args !! 0
-  runProg chan "irc.factset.com" 6667 "george" "gsommers"
+  runProg chan "irc.freenode.com" 6667 "george-1442" "gs4"
 
 runProg :: String -> String -> Int -> String -> String -> IO ()
 runProg chan' server port nick uname = do
@@ -92,7 +92,15 @@ privMsg s = do
 
 handler :: String -> BotAwesome ()
 handler input | "PING :" `isPrefixOf` input = botWrite "PONG"  (':' : drop 6 input)
-              | otherwise = eval input
+              | otherwise = do liftIO $ putStrLn $ "splitInput: " ++ show (splitInput input)
+                               eval input
+
+splitInput :: String -> (String, String, String, String)
+splitInput line = (nick, name, host, cmd)
+    where (nick, rest) = span (\c -> c /= '!') (if null line then [] else tail line)
+          (name, rest') = span (\c -> c /= '@') (if null rest then [] else tail rest)
+          (host, cmd) = span (\c -> c /= ' ') rest'
+
                                   
 eval :: String -> BotAwesome ()
 eval "!quit" = botWrite "QUIT" ":Exiting"
