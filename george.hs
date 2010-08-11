@@ -9,7 +9,6 @@ import Control.Monad.State
 import Control.Monad.Reader
 import Control.Monad.Cont
 import System.Exit
-import Control.Arrow ((&&&))
 
 ----------------------
 
@@ -49,7 +48,7 @@ main = do
   pname <- getProgName
   when (length args /= 1) (putStrLn ("Usage: " ++ pname ++ " <channel>") >> exitWith (ExitFailure (0-1)))
   let chan = args !! 0
-  runProg chan "irc.freenode.com" 6667 "george-1442" "gs4"
+  runProg chan "irc.factset.com" 6667 "george" "gsommers"
 
 runProg :: String -> String -> Int -> String -> String -> IO ()
 runProg chan' server port nick uname = do
@@ -92,7 +91,7 @@ listener = do sock <- _socket `fmap` ask
               forever $ do
                 line <- liftIO $ hGetLine sock
                 let s = init line
-                handler $ splitInput s
+                messageHandler $ splitInput s
                 liftIO $ putStrLn s
         where
           forever a = do a; forever a
@@ -102,10 +101,10 @@ privMsg s = do
   chan <- _chan `fmap` ask
   botWrite "PRIVMSG" (chan ++ " :" ++ s)
 
-handler :: Message -> BotAwesome ()
-handler (ServMsg input) | "PING :" `isPrefixOf` input = botWrite "PONG"  (':' : drop 6 input)
-handler (ServMsg _    ) = return ()
-handler msg = eval msg
+messageHandler :: Message -> BotAwesome ()
+messageHandler (ServMsg input) | "PING :" `isPrefixOf` input = botWrite "PONG"  (':' : drop 6 input)
+messageHandler (ServMsg _    ) = return ()
+messageHandler msg = eval msg
 
 splitInput :: String -> Message
 splitInput line = (`runCont` id) $ do
@@ -148,6 +147,7 @@ eval (PrivMsg fnick fname fhost fto fmsg)
                                         Just str -> str
                                   chan <- _chan `fmap` ask
                                   privMsg result
+  | "!names" `isPrefixOf` fmsg = do botWrite "NAMES" ""
 eval _ = return ()
 
 putToMap :: String -> BotAwesome ()
