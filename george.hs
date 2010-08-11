@@ -7,8 +7,11 @@ import Text.Printf
 import Control.Monad
 import Control.Monad.State
 import Control.Monad.Reader
+import Control.Monad.Cont
 import System.Exit
 import Control.Arrow ((&&&))
+
+----------------------
 
 data Bot = Bot { _socket :: Handle,
                  _port :: Int,
@@ -24,6 +27,15 @@ type BotVal = String
 type BotData = Map.Map BotKey BotVal
 type BotReaderT = ReaderT Bot IO
 type BotAwesome = StateT BotData BotReaderT
+
+---------------------
+
+             {-type    nick   name   host   to     msg   -}
+data Message = PrivMsg String String String String String
+             | ServMsg String 
+             deriving Show
+
+---------------------
 
 runBot :: BotAwesome () -> Bot -> IO ()
 runBot codes defaultBot = runReaderT (fst `fmap` (runStateT codes emptyBot)) defaultBot
@@ -80,7 +92,7 @@ listener = do sock <- _socket `fmap` ask
               forever $ do
                 line <- liftIO $ hGetLine sock
                 let s = init line
-                handler s
+                handler $ splitInput s
                 liftIO $ putStrLn s
         where
           forever a = do a; forever a
@@ -90,31 +102,52 @@ privMsg s = do
   chan <- _chan `fmap` ask
   botWrite "PRIVMSG" (chan ++ " :" ++ s)
 
-handler :: String -> BotAwesome ()
-handler input | "PING :" `isPrefixOf` input = botWrite "PONG"  (':' : drop 6 input)
-              | otherwise = do liftIO $ putStrLn $ "splitInput: " ++ show (splitInput input)
-                               eval input
+handler :: Message -> BotAwesome ()
+handler (ServMsg input) | "PING :" `isPrefixOf` input = botWrite "PONG"  (':' : drop 6 input)
+handler (ServMsg _    ) = return ()
+handler msg = eval msg
 
-splitInput :: String -> (String, String, String, String)
-splitInput line = (nick, name, host, cmd)
-    where (nick, rest) = span (\c -> c /= '!') (if null line then [] else tail line)
-          (name, rest') = span (\c -> c /= '@') (if null rest then [] else tail rest)
-          (host, cmd) = span (\c -> c /= ' ') rest'
+splitInput :: String -> Message
+splitInput line = (`runCont` id) $ do
+  callCC $ \exit -> do
+    let (nick, rest) = span (\c -> c /= '!') (tail line)
+    when (null rest) (exit $ ServMsg line)
+    let (name', rest') = span (\c -> c /= '@') (tail rest)
+    let name = tail name'
+    when (null rest') (exit $ ServMsg line)      
+    let (host', cmd') = span (\c -> c /= ' ') rest'
+    let host = tail host'
+    let cmd = tail cmd'
+    return $ makeMessage nick name host cmd
+      where
+        makeMessage :: String -> String -> String -> String -> Message
+        makeMessage nick name host cmd =
+          let cmdWords = words cmd
+          in case (head cmdWords) of
+            "PRIVMSG" -> parsePrivMsg nick name host (unwords $ tail cmdWords)
+            _ -> ServMsg line
+        parsePrivMsg :: String -> String -> String -> String -> Message
+        parsePrivMsg nick name host str =
+          let (target:msg') = words str
+              msg = tail (unwords msg')
+          in PrivMsg nick name host target msg
 
                                   
-eval :: String -> BotAwesome ()
-eval "!quit" = botWrite "QUIT" ":Exiting"
-eval ('!':'e':'c':'h':'o':rest) = privMsg rest
-eval ('!':'p':'u':'t':rest) = do putToMap rest
-                                 chan <- _chan `fmap` ask
-                                 botWrite chan "saved!"
-eval ('!':'g':'e':'t':rest) = do val <- getFromMap rest
-                                 let result = case val of
-                                       Nothing -> "null"
-                                       Just str -> str
-                                 chan <- _chan `fmap` ask
-                                 botWrite chan "str"
-
+eval :: Message -> BotAwesome ()
+eval (PrivMsg fnick fname fhost fto fmsg)
+  | fmsg == "!quit" = botWrite "QUIT" ":Exiting"
+  | "!id" `isPrefixOf` fmsg = privMsg $ (unwords . tail. words) fmsg
+  | "!put" `isPrefixOf` fmsg = do let rest = (unwords . tail . words) $ fmsg
+                                  putToMap rest
+                                  chan <- _chan `fmap` ask
+                                  privMsg "saved!"
+  | "!get" `isPrefixOf` fmsg = do let rest = (unwords . tail . words) $ fmsg
+                                  val <- getFromMap rest
+                                  let result = case val of
+                                        Nothing -> "null"
+                                        Just str -> str
+                                  chan <- _chan `fmap` ask
+                                  privMsg result
 eval _ = return ()
 
 putToMap :: String -> BotAwesome ()
