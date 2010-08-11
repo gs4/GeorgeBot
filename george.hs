@@ -21,16 +21,15 @@ data Bot = Bot { _socket :: Handle,
 type BotKey = String
 type BotVal = String
 
-type BotData = State (Map.Map BotKey BotVal)
-type BotConfig = Reader Bot
+type BotData = Map.Map BotKey BotVal
 type BotReaderT = ReaderT Bot IO
-type BotAwesome = StateT (BotData ()) BotReaderT
+type BotAwesome = StateT BotData BotReaderT
 
 runBot :: BotAwesome () -> Bot -> IO ()
 runBot codes defaultBot = runReaderT (fst `fmap` (runStateT codes emptyBot)) defaultBot
 
-emptyBot :: BotData ()
-emptyBot =  put Map.empty
+emptyBot :: BotData
+emptyBot =  Map.empty
 
 main :: IO ()
 main = do
@@ -69,12 +68,10 @@ botWrite s t = do
   sock <- _socket `fmap` ask
   liftIO $ echoWrite sock s t
   
---botPut :: BotKey -> BotVal -> BotAwesome ()
--- ghc has to auto-infer this or it fails to compile, (or i could add a pragma)
+botPut :: BotKey -> BotVal -> BotAwesome ()
 botPut key val = modify (Map.insert key val)
                     
---botGet :: BotKey -> BotAwesome (Maybe BotKey)
--- ghc has to auto-infer this or it fails to compile, (or i could add a pragma)
+botGet :: BotKey -> BotAwesome (Maybe BotKey)
 botGet key = (Map.lookup key) `fmap` get
                  
 
@@ -100,23 +97,22 @@ handler input | "PING :" `isPrefixOf` input = botWrite "PONG"  (':' : drop 6 inp
 eval :: String -> BotAwesome ()
 eval "!quit" = botWrite "QUIT" ":Exiting"
 eval ('!':'e':'c':'h':'o':rest) = privMsg rest
-{-
-eval ('!':'p':'u':'t':rest) = do --putToMap rest
+eval ('!':'p':'u':'t':rest) = do putToMap rest
                                  chan <- _chan `fmap` ask
-                                 botWrite chan "saved"
-                                 return ()
+                                 botWrite chan "saved!"
 eval ('!':'g':'e':'t':rest) = do val <- getFromMap rest
-                                 chan <- gets _chan
-                                 return ()
--}
+                                 let result = case val of
+                                       Nothing -> "null"
+                                       Just str -> str
+                                 chan <- _chan `fmap` ask
+                                 botWrite chan "str"
+
 eval _ = return ()
 
-{-
 putToMap :: String -> BotAwesome ()
 putToMap rest = botPut key val
   where key = takeWhile (/=' ') rest 
         val = dropWhile (/=' ') rest
 
-getFromMap :: String -> BotAwesome ()
+getFromMap :: String -> BotAwesome (Maybe BotVal)
 getFromMap rest = botGet rest
--}
