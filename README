@@ -8,6 +8,9 @@ Goals:
     - replace v's at the start of words (like vodka) with w's
     - sometimes make typos
 
+    - say hi to people it hasn't been talking to?
+    - when asked "how are you" respond "fantastic!"
+
 
 
 
@@ -19,6 +22,6 @@ Fixmes:
   - make it parse the serves response to NAMES so it can keep track of those
         + *** joined the channel
         + *** left the channel
-  - make it keep a rolling history of the last 10 things said
+  - make it keep a rolling history of the last 100 things said
 
 
