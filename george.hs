@@ -23,11 +23,16 @@ data Bot = Bot { _socket :: Handle,
 
 type BotKey = String
 type BotVal = String
-
 type RandList = [Float]
-type BotData = (RandList, Map.Map BotKey BotVal)
-type BotReaderT = ReaderT Bot IO
-type BotAwesome = StateT BotData BotReaderT
+type Hook = Message -> BotAwesome Message
+
+data BotData = BotData { 
+  _rands :: RandList,
+  _map   :: (Map.Map BotKey BotVal),
+  _hooks :: Hook
+  }
+               
+type BotAwesome = StateT BotData (ReaderT Bot IO)
 
 ---------------------
 
@@ -38,13 +43,13 @@ data Message = PrivMsg String String String String String
 
 ---------------------
 
-runBot :: BotAwesome () -> Bot -> IO ()
-runBot codes defaultBot = do init <- initialBot
-                             runReaderT (fst `fmap` (runStateT codes init)) defaultBot
+runBot :: BotAwesome () -> Bot -> Hook -> IO ()
+runBot codes defaultBot hook = do init <- initialBot hook
+                                  runReaderT (fst `fmap` (runStateT codes init)) defaultBot
 
-initialBot :: IO BotData
-initialBot = do gen <- getStdGen
-                return (randoms gen, Map.empty)
+initialBot :: Hook -> IO BotData
+initialBot hook = do gen <- getStdGen
+                     return $ BotData (randoms gen) Map.empty hook
 
 main :: IO ()
 main = do
@@ -60,7 +65,7 @@ runProg chan' server port nick uname = do
   putStrLn $ "Connecting to channel " ++ chan ++ " on server " ++ server ++ ":" ++ show port
   h <- ircConnect server chan port nick uname
   return ()
-  runBot (listener) (Bot h port server chan nick uname)   
+  runBot (listener) (Bot h port server chan nick uname) georgeHooks
 
 ircConnect :: String -> String -> Int -> String -> String -> IO Handle
 ircConnect server chan port nick uname = do
@@ -83,18 +88,19 @@ botWrite s t = do
   sock <- _socket `fmap` ask
   liftIO $ echoWrite sock s t
   
-tuple :: (a -> c) -> (b -> d) -> (a, b) -> (c, d) 
-tuple f g (a, b) = (f a, g b)
+modifyRands f (BotData x y z) = BotData (f x) y z
+modifyMap f (BotData x y z) = BotData x (f y) z
+modifyHooks f (BotData x y z) = BotData x y (f z)
   
 botPut :: BotKey -> BotVal -> BotAwesome ()
-botPut key val = modify $ (id `tuple` Map.insert key val)
+botPut key val = modify $ (modifyMap $ Map.insert key val)
                     
 botGet :: BotKey -> BotAwesome (Maybe BotKey)
-botGet key = ((Map.lookup key) . snd) `fmap` (get)
+botGet key = (Map.lookup key) `fmap` (gets _map)
                  
 botRand :: BotAwesome Float
-botRand = do x <- head `fmap` fst `fmap` get
-             modify $ tail `tuple` id
+botRand = do x <- head `fmap` gets _rands
+             modify $ modifyRands $ tail
              return x
 
 listener :: BotAwesome ()
@@ -144,7 +150,7 @@ splitInput line = (`runCont` id) $ do
 
                                   
 eval :: Message -> BotAwesome ()
-eval (PrivMsg fnick fname fhost fto fmsg)
+eval m@(PrivMsg fnick fname fhost fto fmsg)
   | fmsg == "!quit" = botWrite "QUIT" ":Exiting"
   | "!id" `isPrefixOf` fmsg = privMsg $ (unwords . tail. words) fmsg
   | "!put" `isPrefixOf` fmsg = do let rest = (unwords . tail . words) $ fmsg
@@ -162,7 +168,9 @@ eval (PrivMsg fnick fname fhost fto fmsg)
   | "!rand" `isPrefixOf` fmsg = do let n = read $ (head . tail . words) $ fmsg
                                    x <- botRand
                                    privMsg $ "roll: " ++ (show $ truncate $ n * x)
-eval _ = return ()
+  | otherwise = gets _hooks >>= (\f -> f m) >> return ()
+eval x = return ()
+
 
 putToMap :: String -> BotAwesome ()
 putToMap rest = botPut key val
@@ -171,3 +179,51 @@ putToMap rest = botPut key val
 
 getFromMap :: String -> BotAwesome (Maybe BotVal)
 getFromMap rest = botGet rest
+
+addHook :: (Message -> BotAwesome Message) -> BotAwesome ()
+addHook hook = do modify $ modifyHooks $ (composeHooks hook)
+
+composeHooks h1 h2 x = h1 x >>= h2
+
+
+georgeHooks :: Hook
+georgeHooks msg = return msg >>= v2w >>= randomQuestions >>= doEmotes >>= askWhy
+                    
+v2w m@(PrivMsg nick name host to msg) = 
+  do if "vodka" `elem` (words . stripPunctuation) msg
+       then privMsg "Wodka?"
+       else return ()
+     return m
+     
+randomQuestions m@(PrivMsg nick name host to msg) =
+  do x <- botRand
+     if x <= 0.05
+       then do let ws = (words . stripPunctuation) msg
+               y <- botRand
+               let n = truncate $ fromIntegral (length ws) * y
+               let w = ws !! n
+               privMsg $ w ++ "?"
+       else return ()
+     return m
+     
+     
+doEmotes m@(PrivMsg nick name host to msg) = 
+  do x <- botRand
+     if x <= 0.01
+       then privMsg "guys"
+       else return ()
+     return m
+     
+askWhy m@(PrivMsg nick name host to msg) =     
+  do myName <- asks _nick
+     if (myName `isInfixOf` msg)
+       then privMsg "Why?"
+       else return ()
+     return m
+     
+
+stripPunctuation [] = []
+stripPunctuation (a:str) = if a `elem` "!.,:;?-()-_=+~'\"[]{}\\|<>/" 
+                            then stripPunctuation str 
+                            else a:(stripPunctuation str)
+                                 
