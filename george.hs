@@ -9,6 +9,7 @@ import Control.Monad.State
 import Control.Monad.Reader
 import Control.Monad.Cont
 import System.Exit
+import System.Random
 
 ----------------------
 
@@ -23,7 +24,8 @@ data Bot = Bot { _socket :: Handle,
 type BotKey = String
 type BotVal = String
 
-type BotData = Map.Map BotKey BotVal
+type RandList = [Float]
+type BotData = (RandList, Map.Map BotKey BotVal)
 type BotReaderT = ReaderT Bot IO
 type BotAwesome = StateT BotData BotReaderT
 
@@ -37,10 +39,12 @@ data Message = PrivMsg String String String String String
 ---------------------
 
 runBot :: BotAwesome () -> Bot -> IO ()
-runBot codes defaultBot = runReaderT (fst `fmap` (runStateT codes emptyBot)) defaultBot
+runBot codes defaultBot = do init <- initialBot
+                             runReaderT (fst `fmap` (runStateT codes init)) defaultBot
 
-emptyBot :: BotData
-emptyBot =  Map.empty
+initialBot :: IO BotData
+initialBot = do gen <- getStdGen
+                return (randoms gen, Map.empty)
 
 main :: IO ()
 main = do
@@ -79,12 +83,19 @@ botWrite s t = do
   sock <- _socket `fmap` ask
   liftIO $ echoWrite sock s t
   
+tuple :: (a -> c) -> (b -> d) -> (a, b) -> (c, d) 
+tuple f g (a, b) = (f a, g b)
+  
 botPut :: BotKey -> BotVal -> BotAwesome ()
-botPut key val = modify (Map.insert key val)
+botPut key val = modify $ (id `tuple` Map.insert key val)
                     
 botGet :: BotKey -> BotAwesome (Maybe BotKey)
-botGet key = (Map.lookup key) `fmap` get
+botGet key = ((Map.lookup key) . snd) `fmap` (get)
                  
+botRand :: BotAwesome Float
+botRand = do x <- head `fmap` fst `fmap` get
+             modify $ tail `tuple` id
+             return x
 
 listener :: BotAwesome ()
 listener = do sock <- _socket `fmap` ask
@@ -148,6 +159,9 @@ eval (PrivMsg fnick fname fhost fto fmsg)
                                   chan <- _chan `fmap` ask
                                   privMsg result
   | "!names" `isPrefixOf` fmsg = do botWrite "NAMES" ""
+  | "!rand" `isPrefixOf` fmsg = do let n = read $ (head . tail . words) $ fmsg
+                                   x <- botRand
+                                   privMsg $ "roll: " ++ (show $ truncate $ n * x)
 eval _ = return ()
 
 putToMap :: String -> BotAwesome ()
