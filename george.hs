@@ -50,7 +50,7 @@ doEmotes m@(PrivMsg nick name host to msg) =
      return m
      
 askWhy m@(PrivMsg nick name host to msg) =     
-  do myName <- asks _nick
+  do myName <- getNick
      if (myName `isInfixOf` msg)
        then privMsg "what?"
        else return ()
