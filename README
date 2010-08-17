@@ -11,3 +11,4 @@ Goals:
   - more control over hooks maybe?
   - removing hooks? (via id? that's hard... not very "functional"... maybe we should remove the addHooks func even)
   - move basic eval stuff into a BaseBot typeclass or something (a la MonadState, for instance)
+  - possibly use irc library (http://hackage.haskell.org/package/irc) for passing messages
