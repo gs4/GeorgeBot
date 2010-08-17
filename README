@@ -1,4 +1,5 @@
-A Haskell implementation of George Karavaev
+A Haskell IRC bot framework
+   & implementation of George Karavaev
 
 Goals:
   - make it parse the serves response to NAMES so it can keep track of those
