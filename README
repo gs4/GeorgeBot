@@ -1,27 +1,14 @@
-A Haskell implementation of George Karavaev
+A Haskell IRC bot framework
+   & implementation of George Karavaev
 
 Goals:
-  Listen to conversation
-  Select random words, and comment or ask questions about them
-    - weight this towards special words
-    - use a parts of speech dictionary to respond appropriately
-    - replace v's at the start of words (like vodka) with w's
-    - sometimes make typos
-
-    - say hi to people it hasn't been talking to?
-    - when asked "how are you" respond "fantastic!"
-
-
-
-
-
-
-Fixmes:
-  - add or find better ways to do "_sock `fmap` ask"   (asks? helper funcs?)
-  - add a randgen to the state, and make any easy "rand" wrapper we can use from BotAwesome
   - make it parse the serves response to NAMES so it can keep track of those
         + *** joined the channel
         + *** left the channel
-  - make it keep a rolling history of the last 100 things said
+  - make it keep a rolling history of the last N things said
+        + maybe? this could just be left to the user for impl through the map
+  - unicode support!!!! (bytestrings)
+  - more control over hooks maybe?
+  - removing hooks? (via id? that's hard... not very "functional"... maybe we should remove the addHooks func even)
 
 
