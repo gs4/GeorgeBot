@@ -5,6 +5,7 @@ module IRCBot (runBot, Bot (Bot), Hook, Message (PrivMsg, ServMsg), BotKey, BotV
                getServer, getChan, getNick, getUname) where 
 
 import Data.List
+import Data.ByteString.Internal
 import Network
 import System.IO
 import qualified Data.Map as Map
@@ -79,9 +80,11 @@ ircConnect server chan port nick uname = do
   return h
   
 ircWrite :: Bool -> Handle -> String -> String -> IO ()
-ircWrite echo handle s t = do
-  hPrintf handle "%s %s\r\n" s t
-  printf       "> %s %s\n"   s t
+ircWrite echo h s t = do
+  hPutStr h $ s ++ " " ++ t ++ "\r\n"
+  if echo
+    then hPutStrLn h $ "> " ++ s ++ " " ++ t
+    else return ()
 
 echoWrite = ircWrite True
 
